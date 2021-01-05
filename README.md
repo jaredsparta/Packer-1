@@ -16,10 +16,11 @@
 
 <br>
 
-## AMI's
+# AMI's
 
 - These are `Amazon Machine Images` -- snapshots of a virtual machine in a certain state
 
+<br>
 
 ## Packer
 
@@ -62,15 +63,17 @@
     - This ensures that the keys will always be available as environment variables
 
 - Iteration 2:
+    - We can reference environment variables in json through the env keyword. The referencing is identical to Jinja2, i.e. the double curly braces
 ```json
 {
-// NEW CODE
-// We can reference environment variables in json through the env keyword
-// The referencing is identical to Jinja2, i.e. the double curly braces
+//// NEW CODE
+
   "variables": {
     "aws_access_key": "{{env `AWS_ACCESS_KEY`}}",
     "aws_secret_key": "{{env `AWS_SECRET_KEY`}}"
   },
+
+////
 
   "builders": [{
       "type": "amazon-ebs",
@@ -123,7 +126,7 @@
       "ami_name": "eng74-jared-packer-ami-{{timestamp}}"
     }],
 
-////// NEW CODE
+//// NEW CODE
 
   "provisioners": [
     {
@@ -131,106 +134,9 @@
       "playbook_file": "/home/ubuntu/packer-files/app_playbook.yaml"
        }
     ]
+
+/////
 }
-```
-
-- Where the playbook used was:
-
-```yml
----
-#####################
-# APP
-- name: prepares the app environment and runs the app
-  hosts: default
-  vars:
-    database_priv_ip: 172.31.37.102
-
-  tasks:
-  - name: get the needed files for nodejs
-    become: true
-    get_url:
-      url: https://deb.nodesource.com/setup_12.x
-      dest: ~/
-      mode: 755
-
-  - name: run the nodejs bash script so nodejs can be installed
-    become: true
-    shell:
-      cmd: ~/setup_12.x
-
-  - name: install nodejs, nginx
-    become: true
-    apt:
-      name:
-        - nodejs
-        - nginx
-      state: present
-      update_cache: yes
-
-  - name: install pm2 using npm
-    become: true
-    npm:
-      name: pm2
-      global: yes
-      state: present
-
-  - name: copy in the config-file for reverse proxy
-    become: true
-    copy:
-      src: /home/ubuntu/Ansible-1/app-files/reverse-proxy.conf
-      dest: /etc/nginx/sites-available/reverse-proxy.conf
-
-  - name: create symlink from copied file to default
-    become: true
-    file:
-      src: /etc/nginx/sites-available/reverse-proxy.conf
-      dest: /etc/nginx/sites-enabled/default
-      state: link
-
-  - name: restart nginx for new config to take place
-    become: true
-    service:
-      name: nginx
-      state: restarted
-
-# sets the DB_HOST env variable
-  - name: set the DB_HOST variable within .bashrc
-    lineinfile:
-      path: /home/ubuntu/.bashrc
-      line: export DB_HOST={{ database_priv_ip }}
-    become: true
-
-# copies app files, installs dependencies and starts the app
-  - name: copy the app folders over to the host
-    copy:
-      src: /home/ubuntu/Ansible-1/app-files/app
-      dest: /home/ubuntu/
-      owner: ubuntu
-    become: true
-
-
-  - name: ensures node_modules and package-lock.json are not present so we can use seeds
-    file:
-      path:
-        - /home/ubuntu/app/node_modules
-        - /home/ubuntu/app/package-lock.json
-      state: absent
-    become: true
-
-  - name: npm install the dependencies from package.json
-    shell:
-      chdir: /home/ubuntu/app
-      cmd: npm install
-    become: true
-
-  - name: stops any app running with pm2 and starts it again
-    shell: |
-      pm2 kill
-      pm2 start app.js --update-env
-      export DB_HOST={{ database_priv_ip }}
-      pm2 reload app.js --update-env
-    args:
-      chdir: /home/ubuntu/app
 ```
 
 - **Notes:**
@@ -239,6 +145,8 @@
 - Now that's good, but when we create an instance out of the image the app doesn't necessarily run. Some system states aren't kept so one needs to find a way to fix it:
 
 - Iteration 4:
+    - The following new code will save the current pm2 processes and ensures they startup/reload when an instance is created
+
 ```json
 {
   "variables": {
@@ -270,12 +178,14 @@
       "playbook_file": "./app_playbook.yml"
      },
 
-// NEW CODE
-// This will save the current pm2 processes and ensures they startup/reload when an instance is created
+//// NEW CODE
+
      {
       "type": "shell",
       "inline": ["sudo env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u ubuntu --hp /home/ubuntu", "pm2 save"]
      }
     ]
+
+////
 }
 ```
