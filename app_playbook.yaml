@@ -1,0 +1,94 @@
+---
+#####################
+# APP
+- name: prepares the app environment and runs the app
+  hosts: default
+  vars:
+    database_priv_ip: 172.31.37.102
+
+  tasks:
+  - name: get the needed files for nodejs
+    become: true
+    get_url:
+      url: https://deb.nodesource.com/setup_12.x
+      dest: ~/
+      mode: 755
+
+  - name: run the nodejs bash script so nodejs can be installed
+    become: true
+    shell:
+      cmd: ~/setup_12.x
+
+  - name: install nodejs, nginx
+    become: true
+    apt:
+      name:
+        - nodejs
+        - nginx
+      state: present
+      update_cache: yes
+
+  - name: install pm2 using npm
+    become: true
+    npm:
+      name: pm2
+      global: yes
+      state: present
+
+  - name: copy in the config-file for reverse proxy
+    become: true
+    copy:
+      src: /home/ubuntu/Ansible-1/app-files/reverse-proxy.conf
+      dest: /etc/nginx/sites-available/reverse-proxy.conf
+
+  - name: create symlink from copied file to default
+    become: true
+    file:
+      src: /etc/nginx/sites-available/reverse-proxy.conf
+      dest: /etc/nginx/sites-enabled/default
+      state: link
+
+  - name: restart nginx for new config to take place
+    become: true
+    service:
+      name: nginx
+      state: restarted
+
+# sets the DB_HOST env variable
+  - name: set the DB_HOST variable within .bashrc
+    lineinfile:
+      path: /home/ubuntu/.bashrc
+      line: export DB_HOST={{ database_priv_ip }}
+    become: true
+
+# copies app files, installs dependencies and starts the app
+  - name: copy the app folders over to the host
+    copy:
+      src: /home/ubuntu/Ansible-1/app-files/app
+      dest: /home/ubuntu/
+      owner: ubuntu
+    become: true
+
+
+  - name: ensures node_modules and package-lock.json are not present so we can use seeds
+    file:
+      path:
+        - /home/ubuntu/app/node_modules
+        - /home/ubuntu/app/package-lock.json
+      state: absent
+    become: true
+
+  - name: npm install the dependencies from package.json
+    shell:
+      chdir: /home/ubuntu/app
+      cmd: npm install
+    become: true
+
+  - name: stops any app running with pm2 and starts it again
+    shell: |
+      pm2 kill
+      pm2 start app.js --update-env
+      export DB_HOST={{ database_priv_ip }}
+      pm2 reload app.js --update-env
+    args:
+      chdir: /home/ubuntu/app
